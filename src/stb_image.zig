@@ -5,7 +5,7 @@ const Image = struct {
     width: i32,
     height: i32,
     channels: i32,
-    pixels: ?[*]const u8,
+    pixels: ?[*]u8,
 };
 
 pub fn loadImage(filename: [*:0]const u8, set_channels: i32) ?Image {
@@ -25,7 +25,11 @@ pub fn loadImage(filename: [*:0]const u8, set_channels: i32) ?Image {
 
 pub fn freeImage(image: *Image) void {
     if (image.pixels) |ptr| {
-        c.stbi_image_free(ptr);
+        std.debug.print("testing freeing memory {*}\n", .{ptr});
+        c.stbi_image_free(@ptrCast(ptr));
         image.pixels = null;
+        std.debug.print("Freed memory sucessfully!", .{});
+    } else {
+        std.debug.print("No pixel data to be freed\n", .{});
     }
 }
