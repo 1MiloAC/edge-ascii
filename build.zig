@@ -14,6 +14,11 @@ pub fn build(b: *std.Build) void {
             .file = b.path("libs/stb_image.c"),
         },
     );
+    exe.addCSourceFile(
+        .{
+            .file = b.path("libs/stb_image_write.c"),
+        },
+    );
 
     exe.addIncludePath(b.path("src"));
     exe.addIncludePath(b.path("libs"));

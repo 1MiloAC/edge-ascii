@@ -1,11 +1,11 @@
 const std = @import("std");
 const c = @cImport(@cInclude("stb_image.h"));
 
-const Image = struct {
+pub const Image = extern struct {
     width: i32,
     height: i32,
     channels: i32,
-    pixels: ?[*]u8,
+    pixels: ?*u8,
 };
 
 pub fn loadImage(filename: [*:0]const u8, set_channels: i32) ?Image {
