@@ -25,13 +25,7 @@ pub fn main() !void {
     }
 
     var img = image.?;
-
-
     var rimg = try resize(alloc, img);
-    
-    defer stb_image.freeImage(&rimg);
-
-
 
     defer if (img.pixels != null) {
         stb_image.freeImage(&img);
