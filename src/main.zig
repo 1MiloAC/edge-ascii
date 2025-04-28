@@ -3,12 +3,7 @@ const stb_image = @import("stb_image.zig");
 const stb_image_write = @import("stb_image_write.zig");
 
 const Error = error{ImageLoadFailed};
-//pub const RImage = struct {
-//    width: usize,
-//    height: usize,
-//    channels: usize,
-//    pixels: ?*u8,
-//};
+
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -70,49 +65,31 @@ fn resize(allocator: std.mem.Allocator, img: stb_image.Image) !stb_image.Image {
     };
 
     const slice: []u8 = try allocator.alloc(u8, new_pixel_count);
-    const linearized: []u8 = try allocator.alloc(u8, pixel_count);
     const upscale: []u8 = try allocator.alloc(u8, pixel_count);
 
-    for (0..imgW) |x| {
-        for (0..imgH) |y| {
-            const indexL = ((y * imgW + x) * imgC);
+    const linear = try luminize(imgW, imgH, imgC, imgP, allocator);
 
-            const r: f32 = @floatFromInt(imgP[indexL + 0]);
-            const g: f32 = @floatFromInt(imgP[indexL + 1]);
-            const b: f32 = @floatFromInt(imgP[indexL + 2]);
-            const vR: f32 = linearize(r / 255.0);
-            const vG: f32 = linearize(g / 255.0);
-            const vB: f32 = linearize(b / 255.0);
-            const lum = vR * 0.2126 + vG * 0.7152 + vB * 0.0722;
-            const constrained = @floor(lum * 10) / 10;
-
-            for (0..imgC) |c| {
-                linearized[indexL + c] = @intFromFloat(constrained * 255);
-            }
-        }
-    }
-    for (0..new_h) |y| {
-        for (0..new_w) |x| {
+    for (0..new_w) |x| {
+        for (0..new_h) |y| {
             const originX = @divFloor(x * imgW, new_w);
             const originY = @divFloor(y * imgH, new_h);
             const indexN = ((y * new_w + x) * new_c);
             const indexO = ((originY * imgW + originX) * imgC);
 
             for (0..new_c) |c| {
-                slice[indexN + c] = linearized[indexO + c];
+                slice[indexN + c] = linear[indexO + c];
             }
         }
     }
-    for (0..new_h) |y| {
-        std.debug.print("y is {}\n", .{y});
-        for (0..new_w) |x| {
+    for (0..new_w) |x| {
+        for (0..new_h) |y| {
             const oX = @divFloor(x * imgW, new_w);
             const oY = @divFloor(y * imgH, new_h);
             const index = ((y * new_w + x) * new_c);
             std.debug.print("x is {}\n", .{x});
 
-            for (0..8) |h| {
-                for (0..8) |w| {
+            for (0..8) |w| {
+                for (0..8) |h| {
                     const uX = oX + w;
                     const uY = oY + h;
                     const indexO = ((uY * imgW + uX) * imgC);
@@ -127,6 +104,29 @@ fn resize(allocator: std.mem.Allocator, img: stb_image.Image) !stb_image.Image {
 
     rimg.pixels = if (upscale.len != 0) &upscale[0] else null;
     return rimg;
+}
+fn luminize(w: usize, h: usize, c: usize, p: []u8, alloc: std.mem.Allocator) ![]u8 {
+    const pc = w * h * c;
+    const linearized: []u8 = try alloc.alloc(u8, pc);
+    for (0..w) |x| {
+        for (0..h) |y| {
+            const indexL = ((y * w + x) * c);
+
+            const r: f32 = @floatFromInt(p[indexL + 0]);
+            const g: f32 = @floatFromInt(p[indexL + 1]);
+            const b: f32 = @floatFromInt(p[indexL + 2]);
+            const vR: f32 = linearize(r / 255.0);
+            const vG: f32 = linearize(g / 255.0);
+            const vB: f32 = linearize(b / 255.0);
+            const lum = vR * 0.2126 + vG * 0.7152 + vB * 0.0722;
+            const constrained = @floor(lum * 10) / 10;
+
+            for (0..c) |i| {
+                linearized[indexL + i] = @intFromFloat(std.math.clamp( constrained * 255, 0, 255));
+            }
+        }
+    }
+    return linearized;
 }
 
 fn srgbize(c: f32) f32 {
