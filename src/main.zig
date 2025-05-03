@@ -3,8 +3,43 @@ const stb_image = @import("stb_image.zig");
 const stb_image_write = @import("stb_image_write.zig");
 
 const Error = error{ImageLoadFailed};
+const wgpu = @cImport({
+    @cInclude("wgpu.h");
+});
+
+const State = struct {
+    adapter: ?*wgpu.struct_WGPUAdapterImpl = null,
+    instance: ?*wgpu.struct_WGPUInstanceImpl = null,
+    mutex: std.Thread.Mutex = .{},
+    cond: std.Thread.Condition = .{},
+    adapter_ready: bool = false,
+};
+
+var state = State{};
 
 pub fn main() !void {
+    const options: wgpu.WGPURequestAdapterOptions = .{
+        .powerPreference = wgpu.WGPUPowerPreference_HighPerformance,
+        .compatibleSurface = null,
+        .forceFallbackAdapter = wgpu.WGPUOptionalBool_False,
+    };
+    const callback_info: wgpu.WGPURequestAdapterCallbackInfo = .{
+        .nextInChain = null,
+        .callback = adapterCallback,
+        .userdata1 = &state,
+        .userdata2 = null,
+    };
+
+    state.instance = wgpu.wgpuCreateInstance(null);
+    _ = wgpu.wgpuInstanceRequestAdapter(state.instance, &options, callback_info);
+
+    state.mutex.lock();
+    while (!state.adapter_ready) {
+        state.cond.wait(&state.mutex);
+    }
+    state.mutex.unlock();
+    std.debug.print("adapter recievedd {any}\n",.{state.adapter});
+
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
@@ -39,6 +74,27 @@ pub fn main() !void {
 
     stb_image_write.writeImage(wfilename, &img);
     stb_image_write.writeImage(rfilename, &rimg);
+}
+
+fn adapterCallback(
+    status: wgpu.WGPURequestAdapterStatus,
+    adapter: ?*wgpu.struct_WGPUAdapterImpl,
+    message: wgpu.WGPUStringView,
+    userdata1: ?*anyopaque,
+    userdata2: ?*anyopaque,
+) callconv(.C) void {
+    _ = status;
+    _ = message;
+    _ = userdata2;
+
+    const state_ptr: *State = @alignCast(@ptrCast(userdata1.?));
+
+    state_ptr.mutex.lock();
+    defer state_ptr.mutex.unlock();
+
+    state_ptr.adapter = adapter;
+    state_ptr.adapter_ready = true;
+    state_ptr.cond.signal();
 }
 
 fn resize(allocator: std.mem.Allocator, img: stb_image.Image) !stb_image.Image {
@@ -122,7 +178,7 @@ fn luminize(w: usize, h: usize, c: usize, p: []u8, alloc: std.mem.Allocator) ![]
             const constrained = @floor(lum * 10) / 10;
 
             for (0..c) |i| {
-                linearized[indexL + i] = @intFromFloat(std.math.clamp( constrained * 255, 0, 255));
+                linearized[indexL + i] = @intFromFloat(std.math.clamp(constrained * 255, 0, 255));
             }
         }
     }
