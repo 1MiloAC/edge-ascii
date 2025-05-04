@@ -9,36 +9,46 @@ const wgpu = @cImport({
 
 const State = struct {
     adapter: ?*wgpu.struct_WGPUAdapterImpl = null,
+    device: ?*wgpu.struct_WGPUDeviceImpl = null,
+    queue: ?*wgpu.struct_WGPUQueueImpl = null,
     instance: ?*wgpu.struct_WGPUInstanceImpl = null,
     mutex: std.Thread.Mutex = .{},
     cond: std.Thread.Condition = .{},
     adapter_ready: bool = false,
+    device_ready: bool = false,
 };
 
+//var device: ?*wgpu.struct_WGPUDeviceImpl = null;
+//var queue: ?*wgpu.struct_WGPUQueueImpl = null;
 var state = State{};
 
 pub fn main() !void {
-    const options: wgpu.WGPURequestAdapterOptions = .{
-        .powerPreference = wgpu.WGPUPowerPreference_HighPerformance,
-        .compatibleSurface = null,
-        .forceFallbackAdapter = wgpu.WGPUOptionalBool_False,
-    };
-    const callback_info: wgpu.WGPURequestAdapterCallbackInfo = .{
-        .nextInChain = null,
-        .callback = adapterCallback,
-        .userdata1 = &state,
-        .userdata2 = null,
-    };
 
-    state.instance = wgpu.wgpuCreateInstance(null);
-    _ = wgpu.wgpuInstanceRequestAdapter(state.instance, &options, callback_info);
+    wgpuInit();
+    
+//   const device_desc: wgpu.WGPUDeviceDescriptor = .{
+//       .nextInChain = null,
+//       .label = "MainDevice",
+//       .requiredFeatureCount = 0,
+//       .requiredLimits = null,
+//       .defaultQueue = .{
+//           .nextInChain = null,
+//           .label = "MainQueue",
+//       },
+//   };
 
-    state.mutex.lock();
-    while (!state.adapter_ready) {
-        state.cond.wait(&state.mutex);
-    }
-    state.mutex.unlock();
-    std.debug.print("adapter recievedd {any}\n",.{state.adapter});
+//   device = wgpu.wgpuAdapterRequestDevice(adapter: WGPUAdapter, descriptor: [*c]const WGPUDeviceDescriptor, callbackInfo: WGPURequestDeviceCallbackInfo)
+
+
+
+
+
+
+
+
+
+
+
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -75,27 +85,90 @@ pub fn main() !void {
     stb_image_write.writeImage(wfilename, &img);
     stb_image_write.writeImage(rfilename, &rimg);
 }
+fn wgpuInit() void {
+    const options: wgpu.WGPURequestAdapterOptions = .{
+        .powerPreference = wgpu.WGPUPowerPreference_HighPerformance,
+        .compatibleSurface = null,
+        .forceFallbackAdapter = wgpu.WGPUOptionalBool_False,
+    };
+    const adapter_callback: wgpu.WGPURequestAdapterCallbackInfo = .{
+        .nextInChain = null,
+        .callback = callback.adapterCall,
+        .userdata1 = &state,
+        .userdata2 = null,
+    };
+    const device_desc: wgpu.WGPUDeviceDescriptor = .{
+        .nextInChain = null,
+        .requiredFeatureCount = 0,
+        .requiredLimits = null,
+        .defaultQueue = .{
+            .nextInChain = null,
+        },
+    };
+    const device_callback: wgpu.WGPURequestDeviceCallbackInfo = .{
+        .nextInChain = null,
+        .callback = callback.deviceCall,
+        .userdata1 = &state,
+        .userdata2 = null,
+    };
 
-fn adapterCallback(
+    state.instance = wgpu.wgpuCreateInstance(null);
+    _ = wgpu.wgpuInstanceRequestAdapter(state.instance, &options, adapter_callback);
+    _ = wgpu.wgpuAdapterRequestDevice(state.adapter.?, &device_desc, device_callback);
+
+    state.mutex.lock();
+    while (!state.adapter_ready or !state.device_ready) {
+        state.cond.wait(&state.mutex);
+    }
+    state.mutex.unlock();
+    std.debug.print("adapter recievedd {any}, device recieved: {any}\n",.{state.adapter,state.device});
+
+
+}
+const callback = struct {
+
+    pub fn adapterCall(
     status: wgpu.WGPURequestAdapterStatus,
     adapter: ?*wgpu.struct_WGPUAdapterImpl,
     message: wgpu.WGPUStringView,
     userdata1: ?*anyopaque,
     userdata2: ?*anyopaque,
 ) callconv(.C) void {
-    _ = status;
-    _ = message;
-    _ = userdata2;
+        _ = status;
+        _ = message;
+        _ = userdata2;
 
-    const state_ptr: *State = @alignCast(@ptrCast(userdata1.?));
+        const state_ptr: *State = @alignCast(@ptrCast(userdata1.?));
 
-    state_ptr.mutex.lock();
-    defer state_ptr.mutex.unlock();
+        state_ptr.mutex.lock();
+        defer state_ptr.mutex.unlock();
 
-    state_ptr.adapter = adapter;
-    state_ptr.adapter_ready = true;
-    state_ptr.cond.signal();
-}
+        state_ptr.adapter = adapter;
+        state_ptr.adapter_ready = true;
+        state_ptr.cond.signal();
+    }
+    pub fn deviceCall(
+    status: wgpu.WGPURequestDeviceStatus,
+    device: ?*wgpu.struct_WGPUDeviceImpl,
+    message: wgpu.WGPUStringView,
+    userdata1: ?*anyopaque,
+    userdata2: ?*anyopaque,
+) callconv(.C) void {
+        _ = status;
+        _ = message;
+        _ = userdata2;
+
+        const state_ptr: *State = @alignCast(@ptrCast(userdata1.?));
+
+        state_ptr.mutex.lock();
+        defer state_ptr.mutex.unlock();
+
+        state_ptr.device = device;
+        state_ptr.queue = wgpu.wgpuDeviceGetQueue(device.?);
+        state_ptr.device_ready = true;
+        state_ptr.cond.signal();
+    }
+};
 
 fn resize(allocator: std.mem.Allocator, img: stb_image.Image) !stb_image.Image {
     const imgW: usize = @intCast(img.width);
