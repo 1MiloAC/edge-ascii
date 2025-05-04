@@ -67,6 +67,7 @@ pub fn main() !void {
     var img = image.?;
     var rimg = try resize(alloc, img);
 
+
     defer if (img.pixels != null) {
         stb_image.freeImage(&img);
     };
@@ -169,7 +170,16 @@ const callback = struct {
         state_ptr.cond.signal();
     }
 };
-
+fn bufferinit(data: []const u8) wgpu.WGPUBuffer {
+    const desc: wgpu.WGPUBufferDescriptor = .{
+        .usage = wgpu.WGPUBufferUsage_CopyDst | wgpu.WGPUBufferUsage_Storage | wgpu.WGPUBufferUsage_CopySrc,
+        .size = @as(u64, data.len),
+        .mappedAtCreation = wgpu.WGPUOptionalBool_False,
+    };
+    const buffer = wgpu.wgpuDeviceCreateBuffer(state.device, &desc);
+    _ = wgpu.wgpuQueueWriteBuffer(wgpu.wgpuDeviceGetQueue(state.device), buffer, 0, data.ptr, data.len);
+    return buffer;
+}
 fn resize(allocator: std.mem.Allocator, img: stb_image.Image) !stb_image.Image {
     const imgW: usize = @intCast(img.width);
     const imgH: usize = @intCast(img.height);
@@ -234,6 +244,7 @@ fn resize(allocator: std.mem.Allocator, img: stb_image.Image) !stb_image.Image {
     rimg.pixels = if (upscale.len != 0) &upscale[0] else null;
     return rimg;
 }
+
 fn luminize(w: usize, h: usize, c: usize, p: []u8, alloc: std.mem.Allocator) ![]u8 {
     const pc = w * h * c;
     const linearized: []u8 = try alloc.alloc(u8, pc);
