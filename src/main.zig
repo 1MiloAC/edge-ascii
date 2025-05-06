@@ -1,6 +1,24 @@
 const std = @import("std");
 const stb_image = @import("stb_image.zig");
 const stb_image_write = @import("stb_image_write.zig");
+//const shader_source = @embedFile("shader.wgsl");
+const shader_wgsl = 
+\\@group(0) @binding(0) var<storage, read> input_buffer: array<u8>;
+\\@group(0) @binding(1) var<storage, read_write> output_buffer: array<u8>;
+\\
+\\@compute @workgroup_size(8, 8, 1)
+\\fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+\\    let index = global_id.x;
+\\    
+\\    // Make sure we don't go out of bounds
+\\    if (index >= arrayLength(&input_buffer)) {
+\\        return;
+\\    }
+\\    
+\\    // Simple image processing - invert the color
+\\    output_buffer[index] = 255 - input_buffer[index];
+\\}
+;
 
 const Error = error{ImageLoadFailed};
 const wgpu = @cImport({
@@ -73,12 +91,81 @@ pub fn main() !void {
             .userdata2 = null,
         };
 
+        const bind_group_layout = wgpu.wgpuDeviceCreateBindGroupLayout(state.device, &.{
+            .entryCount = 2,
+            .entries = &[_]wgpu.WGPUBindGroupLayoutEntry{
+                .{ .nextInChain = null, .binding = 0, .visibility = wgpu.WGPUShaderStage_Compute, .buffer = .{
+                    .type = wgpu.WGPUBufferBindingType_Storage,
+                    .hasDynamicOffset = wgpu.WGPUOptionalBool_False,
+                    .minBindingSize = size,
+                    },
+                },
+                .{
+                    .nextInChain = null,
+                    .binding = 1,
+                    .visibility = wgpu.WGPUShaderStage_Compute,
+                    .buffer = .{
+                        .type = wgpu.WGPUBufferBindingType_Storage,
+                        .hasDynamicOffset = wgpu.WGPUOptionalBool_False,
+                        .minBindingSize = size,
+                    },
+                },
+            },
+            .nextInChain = null,
+        });
+
+        const shader_module = createShadderModule(state.device);
+        if (shader_module == null){
+            return error.ShaderCompilationFailed;
+        }
+
+        const pipeline_desc: wgpu.WGPUPipelineLayoutDescriptor = .{
+            .nextInChain = null,
+            .bindGroupLayoutCount = 1,
+            .bindGroupLayouts = @ptrCast(&bind_group_layout),
+        };
+        const pipeline_layout = wgpu.wgpuDeviceCreatePipelineLayout(state.device, &pipeline_desc);
+
+        const compute_pipleline_desc: wgpu.WGPUComputePipelineDescriptor = .{
+            .layout = pipeline_layout,
+            .compute = .{ .module = shader_module, .entryPoint = wgpu.struct_WGPUStringView{
+                .data = "main",
+                .length = 4,
+            }, .nextInChain = null },
+            .nextInChain = null,
+        };
+        const pipeline = wgpu.wgpuDeviceCreateComputePipeline(state.device, &compute_pipleline_desc);
+
+        const bind_group = wgpu.wgpuDeviceCreateBindGroup(state.device, &.{ .nextInChain = null, .layout = bind_group_layout, .entryCount = 2, .entries = &[_]wgpu.WGPUBindGroupEntry{
+            .{
+                .nextInChain = null,
+                .binding = 0,
+                .buffer = input_buffer,
+                .offset = 0,
+                .size = size,
+            },
+            .{
+                .nextInChain = null,
+                .binding = 1,
+                .buffer = output_buffer,
+                .offset = 0,
+                .size = size,
+            },
+        } });
+
         const encoder_desc: wgpu.WGPUCommandEncoderDescriptor = .{
             .nextInChain = null,
         };
         const encoder = wgpu.wgpuDeviceCreateCommandEncoder(state.device, &encoder_desc);
 
-        _ = wgpu.wgpuCommandEncoderCopyBufferToBuffer(encoder, input_buffer, 0, output_buffer, 0, @as(u64, size));
+        const pass_desc: wgpu.WGPUComputePassDescriptor = .{
+            .nextInChain = null,
+        };
+        const compute_pass = wgpu.wgpuCommandEncoderBeginComputePass(encoder, &pass_desc);
+        _ = wgpu.wgpuComputePassEncoderSetPipeline(compute_pass, pipeline);
+        _ = wgpu.wgpuComputePassEncoderSetBindGroup(compute_pass, 0, bind_group, 0, null);
+        _ = wgpu.wgpuComputePassEncoderDispatchWorkgroups(compute_pass, 1, 1, 1);
+        _ = wgpu.wgpuComputePassEncoderEnd(compute_pass);
 
         const command = wgpu.wgpuCommandEncoderFinish(encoder, null);
         const queue = wgpu.wgpuDeviceGetQueue(state.device);
@@ -134,6 +221,41 @@ pub fn main() !void {
 
     stb_image_write.writeImage(wfilename, &img);
     stb_image_write.writeImage(rfilename, &rimg);
+}
+fn createShadderModule(device: ?*wgpu.struct_WGPUDeviceImpl) ?*wgpu.struct_WGPUShaderModuleImpl {
+    std.debug.print("Shader content: {any}\n",.{shader_wgsl});
+    std.debug.print("Shader length: {any}\n",.{shader_wgsl.len});
+    std.debug.print("device ptr: {*}\n",.{device});
+
+
+    const wgsl_stype = @as(wgpu.WGPUSType, 1000);
+    std.debug.print("wgsl_stype: {any}\n",.{wgsl_stype});
+    const wgsl_chain: wgpu.WGPUChainedStruct = .{
+        .sType = wgsl_stype,
+        .next = null,
+    };
+    const wgsl_desc: wgpu.WGPUShaderSourceWGSL = .{
+        .chain = wgsl_chain,
+        .code = .{
+            .data = shader_wgsl.ptr,
+            .length = shader_wgsl.len,
+        },
+        
+    };
+    const shader_desc: wgpu.WGPUShaderModuleDescriptor =.{
+        .nextInChain = @ptrCast(&wgsl_desc),
+    };
+    std.debug.print("Shader ptr: {*}\n",.{shader_desc.nextInChain});
+
+    std.debug.print("creating shader module\n",.{});
+    const module = wgpu.wgpuDeviceCreateShaderModule(device, &shader_desc);
+
+    if (module == null) {
+        std.debug.print("failed to create shader module",.{});
+    } else {
+        std.debug.print("shader module created\n",.{});
+    }
+    return module;
 }
 fn wgpuInit() void {
     const options: wgpu.WGPURequestAdapterOptions = .{
@@ -240,7 +362,7 @@ const callback = struct {
 };
 fn bufferinit(data: []const u8) wgpu.WGPUBuffer {
     const desc: wgpu.WGPUBufferDescriptor = .{
-        .usage = wgpu.WGPUBufferUsage_CopySrc | wgpu.WGPUBufferUsage_CopyDst,
+        .usage = wgpu.WGPUBufferUsage_CopySrc | wgpu.WGPUBufferUsage_CopyDst | wgpu.WGPUBufferUsage_Storage,
         .size = @as(u64, data.len),
         .mappedAtCreation = wgpu.WGPUOptionalBool_False,
     };
