@@ -1,22 +1,23 @@
 const std = @import("std");
 const stb_image = @import("stb_image.zig");
 const stb_image_write = @import("stb_image_write.zig");
-//const shader_source = @embedFile("shader.wgsl");
-const shader_wgsl = 
-\\@group(0) @binding(0) var<storage, read> input_buffer: array<u8>;
-\\@group(0) @binding(1) var<storage, read_write> output_buffer: array<u8>;
+//const shader_wgsl = @embedFile("shader.wgsl");
+
+const shader_wgsl =
+\\@group(0) @binding(0) var<storage, read> input_buffer: array<u32>;
+\\@group(0) @binding(1) var<storage, read_write> output_buffer: array<u32>;
 \\
-\\@compute @workgroup_size(8, 8, 1)
+\\@compute @workgroup_size(64) // A single workgroup of size 1x1x1
 \\fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 \\    let index = global_id.x;
-\\    
-\\    // Make sure we don't go out of bounds
+\\
+\\    // Ensure we don't go out of bounds
 \\    if (index >= arrayLength(&input_buffer)) {
 \\        return;
 \\    }
-\\    
-\\    // Simple image processing - invert the color
-\\    output_buffer[index] = 255 - input_buffer[index];
+\\
+\\    // Simple operation: copy input value to output value
+\\    output_buffer[index] = input_buffer[index];
 \\}
 ;
 
@@ -43,7 +44,6 @@ var state = State{};
 
 pub fn main() !void {
     wgpuInit();
-
     //   const device_desc: wgpu.WGPUDeviceDescriptor = .{
     //       .nextInChain = null,
     //       .label = "MainDevice",
@@ -59,7 +59,6 @@ pub fn main() !void {
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
-
     const alloc = arena.allocator();
     const filename = "test.jpeg";
     const cwd = try std.fs.cwd().realpathAlloc(alloc, ".");
@@ -71,6 +70,8 @@ pub fn main() !void {
         return Error.ImageLoadFailed;
     }
 
+    std.debug.print("shader contents:\n{s}\n", .{shader_wgsl});
+
     var img = image.?;
 
     if (img.pixels) |p| {
@@ -81,8 +82,10 @@ pub fn main() !void {
         const buf: [*]u8 = @ptrCast(p);
         const bufp: []u8 = buf[0..size];
 
+        const dispatch: u32 = @intCast(@divTrunc(img.height * img.width - @as(u32, 1), 64));
         const input_buffer = bufferinit(bufp);
         const output_buffer = rbufferinit(size);
+        const copy_buffer = cbufferinit(size);
 
         const buffer_callback: wgpu.WGPUBufferMapCallbackInfo = .{
             .nextInChain = null,
@@ -95,7 +98,7 @@ pub fn main() !void {
             .entryCount = 2,
             .entries = &[_]wgpu.WGPUBindGroupLayoutEntry{
                 .{ .nextInChain = null, .binding = 0, .visibility = wgpu.WGPUShaderStage_Compute, .buffer = .{
-                    .type = wgpu.WGPUBufferBindingType_Storage,
+                    .type = wgpu.WGPUBufferBindingType_ReadOnlyStorage,
                     .hasDynamicOffset = wgpu.WGPUOptionalBool_False,
                     .minBindingSize = size,
                     },
@@ -164,15 +167,16 @@ pub fn main() !void {
         const compute_pass = wgpu.wgpuCommandEncoderBeginComputePass(encoder, &pass_desc);
         _ = wgpu.wgpuComputePassEncoderSetPipeline(compute_pass, pipeline);
         _ = wgpu.wgpuComputePassEncoderSetBindGroup(compute_pass, 0, bind_group, 0, null);
-        _ = wgpu.wgpuComputePassEncoderDispatchWorkgroups(compute_pass, 1, 1, 1);
+        _ = wgpu.wgpuComputePassEncoderDispatchWorkgroups(compute_pass, dispatch, 1,1);
         _ = wgpu.wgpuComputePassEncoderEnd(compute_pass);
+        _ = wgpu.wgpuCommandEncoderCopyBufferToBuffer(encoder, output_buffer, 0, copy_buffer, 0, size);
 
         const command = wgpu.wgpuCommandEncoderFinish(encoder, null);
         const queue = wgpu.wgpuDeviceGetQueue(state.device);
         _ = wgpu.wgpuQueueSubmit(queue, 1, @ptrCast(&command));
         std.debug.print("queue submitted\n", .{});
 
-        _ = wgpu.wgpuBufferMapAsync(output_buffer, wgpu.WGPUMapMode_Read, 0, size, buffer_callback);
+        _ = wgpu.wgpuBufferMapAsync(copy_buffer, wgpu.WGPUMapMode_Read, 0, size, buffer_callback);
         _ = wgpu.wgpuDevicePoll(state.device, wgpu.WGPUOptionalBool_True, null);
 
         state.mutex.lock();
@@ -182,7 +186,7 @@ pub fn main() !void {
         state.mutex.unlock();
         std.debug.print("async done\n", .{});
 
-        const mapped_ptr = wgpu.wgpuBufferGetMappedRange(output_buffer, 0, size);
+        const mapped_ptr = wgpu.wgpuBufferGetMappedRange(copy_buffer, 0, size);
         const mapped_bytes: [*]u8 = @ptrCast(mapped_ptr);
         const output_data = mapped_bytes[0..size];
 
@@ -199,7 +203,7 @@ pub fn main() !void {
 
         stb_image_write.writeImage(ofilename, &final_image);
 
-        wgpu.wgpuBufferUnmap(output_buffer);
+        wgpu.wgpuBufferUnmap(copy_buffer);
     }
 
     var rimg = try resize(alloc, img);
@@ -227,8 +231,7 @@ fn createShadderModule(device: ?*wgpu.struct_WGPUDeviceImpl) ?*wgpu.struct_WGPUS
     std.debug.print("Shader length: {any}\n",.{shader_wgsl.len});
     std.debug.print("device ptr: {*}\n",.{device});
 
-
-    const wgsl_stype = @as(wgpu.WGPUSType, 1000);
+    const wgsl_stype = @as(wgpu.WGPUSType, wgpu.WGPUSType_ShaderSourceWGSL);
     std.debug.print("wgsl_stype: {any}\n",.{wgsl_stype});
     const wgsl_chain: wgpu.WGPUChainedStruct = .{
         .sType = wgsl_stype,
@@ -238,8 +241,7 @@ fn createShadderModule(device: ?*wgpu.struct_WGPUDeviceImpl) ?*wgpu.struct_WGPUS
         .chain = wgsl_chain,
         .code = .{
             .data = shader_wgsl.ptr,
-            .length = shader_wgsl.len,
-        },
+            .length = shader_wgsl.len, },
         
     };
     const shader_desc: wgpu.WGPUShaderModuleDescriptor =.{
@@ -362,7 +364,7 @@ const callback = struct {
 };
 fn bufferinit(data: []const u8) wgpu.WGPUBuffer {
     const desc: wgpu.WGPUBufferDescriptor = .{
-        .usage = wgpu.WGPUBufferUsage_CopySrc | wgpu.WGPUBufferUsage_CopyDst | wgpu.WGPUBufferUsage_Storage,
+        .usage = wgpu.WGPUBufferUsage_CopyDst | wgpu.WGPUBufferUsage_Storage,
         .size = @as(u64, data.len),
         .mappedAtCreation = wgpu.WGPUOptionalBool_False,
     };
@@ -372,12 +374,21 @@ fn bufferinit(data: []const u8) wgpu.WGPUBuffer {
 }
 fn rbufferinit(size: usize) wgpu.WGPUBuffer {
     const desc: wgpu.WGPUBufferDescriptor = .{
+        .usage = wgpu.WGPUBufferUsage_Storage | wgpu.WGPUBufferUsage_CopySrc,
+        .size = @as(u64, size),
+        .mappedAtCreation = wgpu.WGPUOptionalBool_False,
+    };
+    return wgpu.wgpuDeviceCreateBuffer(state.device, &desc);
+}
+fn cbufferinit(size: usize) wgpu.WGPUBuffer {
+    const desc: wgpu.WGPUBufferDescriptor = .{
         .usage = wgpu.WGPUBufferUsage_CopyDst | wgpu.WGPUBufferUsage_MapRead,
         .size = @as(u64, size),
         .mappedAtCreation = wgpu.WGPUOptionalBool_False,
     };
     return wgpu.wgpuDeviceCreateBuffer(state.device, &desc);
 }
+
 fn resize(allocator: std.mem.Allocator, img: stb_image.Image) !stb_image.Image {
     const imgW: usize = @intCast(img.width);
     const imgH: usize = @intCast(img.height);
