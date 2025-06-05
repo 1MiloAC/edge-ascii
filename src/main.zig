@@ -1,25 +1,25 @@
 const std = @import("std");
 const stb_image = @import("stb_image.zig");
 const stb_image_write = @import("stb_image_write.zig");
-//const shader_wgsl = @embedFile("shader.wgsl");
+const shader_wgsl = @embedFile("shader.wgsl");
 
-const shader_wgsl =
-\\@group(0) @binding(0) var<storage, read> input_buffer: array<u32>;
-\\@group(0) @binding(1) var<storage, read_write> output_buffer: array<u32>;
-\\
-\\@compute @workgroup_size(64) // A single workgroup of size 1x1x1
-\\fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-\\    let index = global_id.x;
-\\
-\\    // Ensure we don't go out of bounds
-\\    if (index >= arrayLength(&input_buffer)) {
-\\        return;
-\\    }
-\\
-\\    // Simple operation: copy input value to output value
-\\    output_buffer[index] = input_buffer[index];
-\\}
-;
+//const shader_wgsl =
+//\\@group(0) @binding(0) var<storage, read> input_buffer: array<u32>;
+//\\@group(0) @binding(1) var<storage, read_write> output_buffer: array<u32>;
+//\\
+//\\@compute @workgroup_size(64) // A single workgroup of size 1x1x1
+//\\fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+//\\    let index = global_id.x;
+//\\
+//\\    // Ensure we don't go out of bounds
+//\\    if (index >= arrayLength(&input_buffer)) {
+//\\        return;
+//\\    }
+//\\
+//\\    // Simple operation: copy input value to output value
+//\\    output_buffer[index] = input_buffer[index];
+//\\}
+//;
 
 const Error = error{ImageLoadFailed};
 const wgpu = @cImport({
@@ -44,18 +44,6 @@ var state = State{};
 
 pub fn main() !void {
     wgpuInit();
-    //   const device_desc: wgpu.WGPUDeviceDescriptor = .{
-    //       .nextInChain = null,
-    //       .label = "MainDevice",
-    //       .requiredFeatureCount = 0,
-    //       .requiredLimits = null,
-    //       .defaultQueue = .{
-    //           .nextInChain = null,
-    //           .label = "MainQueue",
-    //       },
-    //   };
-
-    //   device = wgpu.wgpuAdapterRequestDevice(adapter: WGPUAdapter, descriptor: [*c]const WGPUDeviceDescriptor, callbackInfo: WGPURequestDeviceCallbackInfo)
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -82,7 +70,7 @@ pub fn main() !void {
         const buf: [*]u8 = @ptrCast(p);
         const bufp: []u8 = buf[0..size];
 
-        const dispatch: u32 = @intCast(@divTrunc(img.height * img.width - @as(u32, 1), 64));
+        const dispatch: u32 = @intCast(@divTrunc(img.height * img.width + @as(u32, 63), 64));
         const input_buffer = bufferinit(bufp);
         const output_buffer = rbufferinit(size);
         const copy_buffer = cbufferinit(size);
