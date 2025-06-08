@@ -3,24 +3,6 @@ const stb_image = @import("stb_image.zig");
 const stb_image_write = @import("stb_image_write.zig");
 const shader_wgsl = @embedFile("shader.wgsl");
 
-//const shader_wgsl =
-//\\@group(0) @binding(0) var<storage, read> input_buffer: array<u32>;
-//\\@group(0) @binding(1) var<storage, read_write> output_buffer: array<u32>;
-//\\
-//\\@compute @workgroup_size(64) // A single workgroup of size 1x1x1
-//\\fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-//\\    let index = global_id.x;
-//\\
-//\\    // Ensure we don't go out of bounds
-//\\    if (index >= arrayLength(&input_buffer)) {
-//\\        return;
-//\\    }
-//\\
-//\\    // Simple operation: copy input value to output value
-//\\    output_buffer[index] = input_buffer[index];
-//\\}
-//;
-
 const Error = error{ImageLoadFailed};
 const wgpu = @cImport({
     @cInclude("wgpu.h");
@@ -69,10 +51,14 @@ pub fn main() !void {
         const size: usize = h * w * c;
         const buf: [*]u8 = @ptrCast(p);
         const bufp: []u8 = buf[0..size];
+        //const pr_size: u32 = @intCast((((w*c)+255)/256)*64);
+        //const p_size: u32 = @intCast(pr_size * h);
 
-        const dispatch: u32 = @intCast(@divTrunc(img.height * img.width + @as(u32, 63), 64));
+        //const dispatch: u32 = @intCast(@divTrunc(img.height * img.width + @as(u32, 63), 64));
+        const dispatch_x: u32 = @intCast(@divTrunc(img.width + @as(u32,15), 16));
+        const dispatch_y: u32 = @intCast(@divTrunc(img.height + @as(u32,15), 16));
         const input_buffer = initTexture(bufp, @intCast(w), @intCast(h));
-        const output_buffer = initOutTexture(@intCast(w), @intCast(h));
+        const output_buffer = rbufferinit(size);
         const copy_buffer = cbufferinit(size);
 
         const buffer_callback: wgpu.WGPUBufferMapCallbackInfo = .{
@@ -90,6 +76,7 @@ pub fn main() !void {
                     .binding = 0, 
                     .visibility = wgpu.WGPUShaderStage_Compute, 
                     .texture = .{
+                        .viewDimension = wgpu.WGPUTextureViewDimension_2D,
                         .sampleType = wgpu.WGPUTextureSampleType_Float,
                         .multisampled = wgpu.WGPUOptionalBool_False,
                         .nextInChain = null,
@@ -99,11 +86,12 @@ pub fn main() !void {
                     .nextInChain = null,
                     .binding = 1,
                     .visibility = wgpu.WGPUShaderStage_Compute,
-                    .storageTexture = .{
-                        .access = wgpu.WGPUStorageTextureAccess_WriteOnly,
-                        .format = wgpu.WGPUTextureFormat_RGBA8Unorm,
+                    .buffer = .{
+                        .type = wgpu.WGPUBufferBindingType_Storage,
+                        .hasDynamicOffset = wgpu.WGPUOptionalBool_False,
+                        .minBindingSize = 0,
                         .nextInChain = null,
-                    },
+                    }
                 },
             },
             .nextInChain = null,
@@ -143,18 +131,6 @@ pub fn main() !void {
         };
         const iTextureView = wgpu.wgpuTextureCreateView(input_buffer, &iTextureViewDesc);
 
-        const oTextureViewDesc: wgpu.WGPUTextureViewDescriptor = .{
-            .nextInChain = null,
-            .format = wgpu.WGPUTextureFormat_RGBA8Unorm,
-            .dimension = wgpu.WGPUTextureViewDimension_2D,
-            .baseMipLevel = 0,
-            .mipLevelCount = 1,
-            .baseArrayLayer = 0,
-            .arrayLayerCount = 1,
-            .aspect = wgpu.WGPUTextureAspect_All,
-        };
-        const oTextureView = wgpu.wgpuTextureCreateView(output_buffer, &oTextureViewDesc);
-
         const bind_group = wgpu.wgpuDeviceCreateBindGroup(state.device, &.{ .nextInChain = null, .layout = bind_group_layout, .entryCount = 2, .entries = &[_]wgpu.WGPUBindGroupEntry{
             .{
                 .nextInChain = null,
@@ -164,7 +140,10 @@ pub fn main() !void {
             .{
                 .nextInChain = null,
                 .binding = 1,
-                .textureView = oTextureView,
+                .buffer = output_buffer,
+                .offset = 0,
+                .size = size
+
             },
         } });
 
@@ -179,32 +158,12 @@ pub fn main() !void {
         const compute_pass = wgpu.wgpuCommandEncoderBeginComputePass(encoder, &pass_desc);
         _ = wgpu.wgpuComputePassEncoderSetPipeline(compute_pass, pipeline);
         _ = wgpu.wgpuComputePassEncoderSetBindGroup(compute_pass, 0, bind_group, 0, null);
-        _ = wgpu.wgpuComputePassEncoderDispatchWorkgroups(compute_pass, dispatch, 1,1);
+        _ = wgpu.wgpuComputePassEncoderDispatchWorkgroups(compute_pass, dispatch_x, dispatch_y,1);
         _ = wgpu.wgpuComputePassEncoderEnd(compute_pass);
 
 
-        _ = wgpu.wgpuCommandEncoderCopyTextureToBuffer(encoder,
-        &wgpu.WGPUTexelCopyTextureInfo{
-            .texture = output_buffer,
-            .mipLevel = 0,
-            .origin = .{.x=0,.y = 0,.z = 0},
-            .aspect = wgpu.WGPUTextureAspect_All,
-        }, 
-        &wgpu.WGPUTexelCopyBufferInfo{
-            .buffer = copy_buffer, 
-            .layout = wgpu.struct_WGPUTexelCopyBufferLayout{
-                .rowsPerImage = @intCast(h),
-                .offset = 0,
-                .bytesPerRow = @intCast(w * c)
-            }
-        },
-        &wgpu.WGPUExtent3D{
-            .width = @intCast(w),
-            .height = @intCast(h),
-            .depthOrArrayLayers = 1,
-        },);
 
-        //_ = wgpu.wgpuCommandEncoderCopyBufferToBuffer(encoder, output_buffer, 0, copy_buffer, 0, size);
+        _ = wgpu.wgpuCommandEncoderCopyBufferToBuffer(encoder, output_buffer, 0, copy_buffer, 0, size);
 
         const command = wgpu.wgpuCommandEncoderFinish(encoder, null);
         const queue = wgpu.wgpuDeviceGetQueue(state.device);
@@ -414,7 +373,7 @@ fn initTexture(data: []const u8, w: u32, h: u32) wgpu.WGPUTexture {
         .origin = .{.x = 0, .y = 0, .z = 0},
     };
     const tlayout: wgpu.WGPUTexelCopyBufferLayout = .{
-        .bytesPerRow = w * 4,
+        .bytesPerRow = 4 * w,
         .offset = 0,
         .rowsPerImage = h,
     };
@@ -428,23 +387,23 @@ fn initTexture(data: []const u8, w: u32, h: u32) wgpu.WGPUTexture {
     _ = wgpu.wgpuQueueWriteTexture(wgpu.wgpuDeviceGetQueue(state.device), &tdestination, data.ptr, data.len, &tlayout, &tsize);
     return texture;
 }
-fn initOutTexture(w: u32, h: u32) wgpu.WGPUTexture {
-    const desc: wgpu.WGPUTextureDescriptor =.{
-        .size = .{
-            .height = h,
-            .width = w,
-            .depthOrArrayLayers = 1,
-        },
-        .mipLevelCount = 1,
-        .sampleCount = 1,
-        .dimension = wgpu.WGPUTextureDimension_2D,
-        .format = wgpu.WGPUTextureFormat_RGBA8Unorm,
-        .usage = wgpu.WGPUTextureUsage_StorageBinding | wgpu.WGPUTextureUsage_CopySrc,
-        .nextInChain = null,
-        
-    };
-    return wgpu.wgpuDeviceCreateTexture(state.device, &desc);
-}
+//fn initOutTexture(w: u32, h: u32) wgpu.WGPUTexture {
+//    const desc: wgpu.WGPUTextureDescriptor =.{
+//        .size = .{
+//            .height = h,
+//            .width = w,
+//            .depthOrArrayLayers = 1,
+//        },
+//        .mipLevelCount = 1,
+//        .sampleCount = 1,
+//        .dimension = wgpu.WGPUTextureDimension_2D,
+//        .format = wgpu.WGPUTextureFormat_RGBA8Unorm,
+//        .usage = wgpu.WGPUTextureUsage_StorageBinding | wgpu.WGPUTextureUsage_CopySrc,
+//        .nextInChain = null,
+//        
+//    };
+//    return wgpu.wgpuDeviceCreateTexture(state.device, &desc);
+//}
 //fn bufferinit(data: []const u8) wgpu.WGPUBuffer {
 //    const desc: wgpu.WGPUBufferDescriptor = .{
 //        .usage = wgpu.WGPUBufferUsage_CopyDst | wgpu.WGPUBufferUsage_Storage,
@@ -455,14 +414,14 @@ fn initOutTexture(w: u32, h: u32) wgpu.WGPUTexture {
 //    _ = wgpu.wgpuQueueWriteBuffer(wgpu.wgpuDeviceGetQueue(state.device), buffer, 0, data.ptr, data.len);
 //    return buffer;
 //}
-//fn rbufferinit(size: usize) wgpu.WGPUBuffer {
-//    const desc: wgpu.WGPUBufferDescriptor = .{
-//        .usage = wgpu.WGPUBufferUsage_Storage | wgpu.WGPUBufferUsage_CopySrc,
-//        .size = @as(u64, size),
-//        .mappedAtCreation = wgpu.WGPUOptionalBool_False,
-//    };
-//    return wgpu.wgpuDeviceCreateBuffer(state.device, &desc);
-//}
+fn rbufferinit(size: usize) wgpu.WGPUBuffer {
+    const desc: wgpu.WGPUBufferDescriptor = .{
+        .usage = wgpu.WGPUBufferUsage_Storage | wgpu.WGPUBufferUsage_CopySrc,
+        .size = @as(u64, size),
+        .mappedAtCreation = wgpu.WGPUOptionalBool_False,
+    };
+    return wgpu.wgpuDeviceCreateBuffer(state.device, &desc);
+}
 fn cbufferinit(size: usize) wgpu.WGPUBuffer {
     const desc: wgpu.WGPUBufferDescriptor = .{
         .usage = wgpu.WGPUBufferUsage_CopyDst | wgpu.WGPUBufferUsage_MapRead,
