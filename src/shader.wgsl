@@ -12,7 +12,38 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     let pixel = textureLoad(input_buffer,coords,0);
 
-    let packed = pack4x8unorm(pixel);
+    let linear_r = linearize(pixel.r);
+    let linear_g = linearize(pixel.g);
+    let linear_b = linearize(pixel.b);
+
+    let pixel_l = vec3<f32>(linear_r, linear_g, linear_b);
+    let lum_weight = vec3<f32>(0.2126, 0.7152, 0.0722);
+
+    let linear = dot(pixel_l, lum_weight); 
+    let srgb = srgbize(linear);
+
+    let srgb_packed = vec4<f32>(
+        srgb,
+        srgb,
+        srgb,
+        pixel.a
+    );
+
+    let packed = pack4x8unorm(srgb_packed);
     let index = u32(coords.y) * dims.x + u32(coords.x);
     output_buffer[index] = packed;
 } 
+fn srgbize(c:f32) -> f32 {
+    if (c <= 0.0031308) {
+        return c * 12.92;
+    } else {
+        return pow(c, 1.0 / 2.4) - 0.055;
+    }
+}
+fn linearize(c:f32) -> f32 {
+    if (c <= 0.04045) {
+        return c / 12.92;
+    } else {
+        return pow(((c + 0.055) / 1.055), 2.4);
+    }
+}

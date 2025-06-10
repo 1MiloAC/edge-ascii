@@ -9,6 +9,7 @@ const wgpu = @cImport({
 });
 
 const State = struct {
+    //testing
     adapter: ?*wgpu.struct_WGPUAdapterImpl = null,
     device: ?*wgpu.struct_WGPUDeviceImpl = null,
     queue: ?*wgpu.struct_WGPUQueueImpl = null,
@@ -20,8 +21,7 @@ const State = struct {
     bmap_ready: bool = false,
 };
 
-//var device: ?*wgpu.struct_WGPUDeviceImpl = null;
-//var queue: ?*wgpu.struct_WGPUQueueImpl = null;
+
 var state = State{};
 
 pub fn main() !void {
@@ -51,10 +51,7 @@ pub fn main() !void {
         const size: usize = h * w * c;
         const buf: [*]u8 = @ptrCast(p);
         const bufp: []u8 = buf[0..size];
-        //const pr_size: u32 = @intCast((((w*c)+255)/256)*64);
-        //const p_size: u32 = @intCast(pr_size * h);
 
-        //const dispatch: u32 = @intCast(@divTrunc(img.height * img.width + @as(u32, 63), 64));
         const dispatch_x: u32 = @intCast(@divTrunc(img.width + @as(u32,15), 16));
         const dispatch_y: u32 = @intCast(@divTrunc(img.height + @as(u32,15), 16));
         const input_buffer = initTexture(bufp, @intCast(w), @intCast(h));
@@ -68,6 +65,7 @@ pub fn main() !void {
             .userdata2 = null,
         };
 
+        //Bind Group Layout
         const bind_group_layout = wgpu.wgpuDeviceCreateBindGroupLayout(state.device, &.{
             .entryCount = 2,
             .entries = &[_]wgpu.WGPUBindGroupLayoutEntry{
@@ -96,6 +94,7 @@ pub fn main() !void {
             },
             .nextInChain = null,
         });
+
 
         const shader_module = createShadderModule(state.device);
         if (shader_module == null){
@@ -387,33 +386,7 @@ fn initTexture(data: []const u8, w: u32, h: u32) wgpu.WGPUTexture {
     _ = wgpu.wgpuQueueWriteTexture(wgpu.wgpuDeviceGetQueue(state.device), &tdestination, data.ptr, data.len, &tlayout, &tsize);
     return texture;
 }
-//fn initOutTexture(w: u32, h: u32) wgpu.WGPUTexture {
-//    const desc: wgpu.WGPUTextureDescriptor =.{
-//        .size = .{
-//            .height = h,
-//            .width = w,
-//            .depthOrArrayLayers = 1,
-//        },
-//        .mipLevelCount = 1,
-//        .sampleCount = 1,
-//        .dimension = wgpu.WGPUTextureDimension_2D,
-//        .format = wgpu.WGPUTextureFormat_RGBA8Unorm,
-//        .usage = wgpu.WGPUTextureUsage_StorageBinding | wgpu.WGPUTextureUsage_CopySrc,
-//        .nextInChain = null,
-//        
-//    };
-//    return wgpu.wgpuDeviceCreateTexture(state.device, &desc);
-//}
-//fn bufferinit(data: []const u8) wgpu.WGPUBuffer {
-//    const desc: wgpu.WGPUBufferDescriptor = .{
-//        .usage = wgpu.WGPUBufferUsage_CopyDst | wgpu.WGPUBufferUsage_Storage,
-//        .size = @as(u64, data.len),
-//        .mappedAtCreation = wgpu.WGPUOptionalBool_False,
-//    };
-//    const buffer = wgpu.wgpuDeviceCreateBuffer(state.device, &desc);
-//    _ = wgpu.wgpuQueueWriteBuffer(wgpu.wgpuDeviceGetQueue(state.device), buffer, 0, data.ptr, data.len);
-//    return buffer;
-//}
+
 fn rbufferinit(size: usize) wgpu.WGPUBuffer {
     const desc: wgpu.WGPUBufferDescriptor = .{
         .usage = wgpu.WGPUBufferUsage_Storage | wgpu.WGPUBufferUsage_CopySrc,
