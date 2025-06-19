@@ -1,7 +1,11 @@
 @group(0) @binding(0) var input_buffer: texture_2d<f32>;
 @group(0) @binding(1) var text_store_w: texture_storage_2d<rgba8unorm, write>;
 @group(0) @binding(2) var text_store_r: texture_2d<f32>;
-@group(0) @binding(3) var<storage, read_write> output_buffer: array<u32>;
+@group(0) @binding(3) var text2_w: texture_storage_2d<rgba8unorm, write>;
+@group(0) @ginding(4) var text2_r: texture_2d<f32>;
+@group(0) @binding(5) var<storage, read_write> output_buffer: array<u32>;
+
+override SIZE: u32 = 19;
 
 
 @compute @workgroup_size(16,16)
@@ -44,21 +48,8 @@ fn main2(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 
     let sigma = 3f;
-    let k_size = sigma * 6f + 1f;
-    let k_middle = ceil((k_size - 1) / 2.0);
-    let arr = kernal(k_size, k_middle, sigma);
-    var convolve_x_rgb: vec3<f32> = vec3<f32>(0.0);
-    var alpha = 0f;
-
-
-    for (var i: i32; i < i32(k_size); i = i + 1) {
-        let x = i - i32(k_middle);
-        let pix = textureLoad(text_store_r, vec2<i32>(coords.x + x, coords.y), 0);
-        alpha = pix.a;
-        convolve_x_rgb += vec3<f32>(pix.rgb * arr[i]);
-    }
-    let convolve_x = vec4<f32>(convolve_x_rgb, alpha);
-    textureStore(text_store_w, coords, convolve_x);
+    let convolve = gauss(coords, sigma, vec2<i32>(1,0));
+    textureStore(text_store_w, coords, convolve);
 }
 @compute @workgroup_size(16,16)
 fn main3(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -70,28 +61,31 @@ fn main3(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 
     let sigma = 3f;
-    let k_size = sigma * 6f + 1f;
-    let k_middle = ceil((k_size - 1) / 2.0);
-    let arr = kernal(k_size, k_middle, sigma);
-    var convolve_y_rgb: vec3<f32> = vec3<f32>(0.0);
-    var alpha = 0f;
-
-    for (var i: i32; i < i32(k_size); i = i + 1) {
-        let y = i - i32(k_middle);
-        let pix = textureLoad(text_store_r, vec2<i32>(coords.x, coords.y + y), 0);
-        alpha = pix.a;
-        convolve_y_rgb += vec3<f32>(pix.rgb * arr[i]);
-    }
-    let convolve_y = vec4<f32>(convolve_y_rgb, alpha);
-
-    let packed = pack4x8unorm(convolve_y);
+    let convolve = gauss(coords, sigma, vec2<i32>(0,1));
+    let packed = pack4x8unorm(convolve);
     let index = u32(coords.y) * dims.x + u32(coords.x);
     output_buffer[index] = packed;
 } 
-fn kernal(k: f32, m: f32, s: f32) -> array<f32, 19> {
+fn gauss(coords: vec2<i32>, sigma:f32, direction: vec2<i32>) -> vec4<f32> {
+    let k_size = sigma * 6f + 1f;
+    let k_middle = ceil((k_size - 1) / 2.0);
+    let arr = kernal(k_size, k_middle, sigma);
+    var convolve: vec3<f32> = vec3<f32>(0.0);
+    var alpha = 0f;
+
+    for (var i: i32; i < i32(k_size); i = i + 1) {
+        let offset = i - i32(k_middle);
+        let input_coords = coords + direction * offset;
+        let pix = textureLoad(text_store_r, input_coords, 0);
+        alpha = pix.a;
+        convolve += vec3<f32>(pix.rgb * arr[i]);
+    }
+    return vec4<f32>(convolve, alpha);
+} 
+fn kernal(k: f32, m: f32, s: f32) -> array<f32, 32> {
     let pi = radians(180f);
     var constraint = 0f;
-    var arr: array<f32, 19>;
+    var arr: array<f32, 32>;
 
     for (var i: f32 = 0.0f; i < f32(k); i = i + 1.0f) {
         let x2: f32 = pow((i - m), 2f);
