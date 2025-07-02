@@ -119,10 +119,11 @@ fn luminize(w: usize, h: usize, c: usize, p: []u8, alloc: std.mem.Allocator) ![]
             const vG: f32 = linearize(g / 255.0);
             const vB: f32 = linearize(b / 255.0);
             const lum = vR * 0.2126 + vG * 0.7152 + vB * 0.0722;
-            const constrained = @floor(lum * 10) / 10;
+            const constrained = @round(srgbize(lum) * 9) / 9;
 
             for (0..c) |i| {
-                linearized[indexL + i] = @intFromFloat(std.math.clamp( constrained * 255, 0, 255));
+                //linearized[indexL + i] = @intFromFloat(std.math.clamp( constrained * 255, 0, 255));
+                linearized[indexL + i] = @intFromFloat(std.math.clamp(constrained * 255,0,255));
             }
         }
     }
