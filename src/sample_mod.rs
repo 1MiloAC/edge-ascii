@@ -15,7 +15,23 @@ pub async fn setup() -> anyhow::Result<()> {
 
     let instance = wgpu::Instance::new(&Default::default());
     let adapter = instance.request_adapter(&Default::default()).await.unwrap();
-    let (device, queue) = adapter.request_device(&Default::default()).await.unwrap();
+    let features = adapter.features();
+    println!("Afeatures: {:?}", features);
+    if features.contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES) {
+        println!("supported")
+    }
+    let (device, queue) = adapter
+        .request_device(&wgpu::DeviceDescriptor {
+            label: Some("Device"),
+            required_features: wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
+            required_limits: wgpu::Limits::default(),
+            experimental_features: wgpu::ExperimentalFeatures::default(),
+            memory_hints: wgpu::MemoryHints::default(),
+            trace: wgpu::Trace::default(),
+        })
+        //test
+        .await
+        .unwrap();
     let shader = device.create_shader_module(wgpu::include_wgsl!("test.wgsl"));
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("encoder"),
