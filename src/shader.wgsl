@@ -86,7 +86,7 @@ fn main3(@builtin(global_invocation_id) global_id: vec3<u32>) {
         convolve.a
     );
 
-    textureStore(text_store_w,coords,test);
+    textureStore(text_store_w, coords, test);
 
     //let packed = pack4x8unorm(abs(test));
     //let index = u32(coords.y) * dims.x + u32(coords.x);
@@ -100,8 +100,8 @@ fn main4(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if coords.x >= i32(dims.x) || coords.y >= i32(dims.y) {
         return;
     }
-    let convolve = sobel(coords, true, vec2<i32>(1,0), text_store_r);
-    let convolve2 = sobel(coords, false, vec2<i32>(1,0), text_store_r);
+    let convolve = sobel(coords, true, vec2<i32>(1, 0), text_store_r);
+    let convolve2 = sobel(coords, false, vec2<i32>(1, 0), text_store_r);
     textureStore(text_store_w, coords, convolve);
     textureStore(text2_w, coords, convolve2);
 }
@@ -113,8 +113,8 @@ fn main5(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if coords.x >= i32(dims.x) || coords.y >= i32(dims.y) {
         return;
     }
-    let convolve = sobel(coords, false, vec2<i32>(0,1), text_store_r);
-    let convolve2 = sobel(coords, true, vec2<i32>(0,1), text2_r);
+    let convolve = sobel(coords, false, vec2<i32>(0, 1), text_store_r);
+    let convolve2 = sobel(coords, true, vec2<i32>(0, 1), text2_r);
 
     let g = sqrt(convolve.r * convolve.r + convolve2.r * convolve2.r);
     let g_packed = vec4<f32>(

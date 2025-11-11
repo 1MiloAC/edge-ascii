@@ -1,19 +1,22 @@
-use image::{GenericImage, GenericImageView, ImageBuffer, open};
+use anyhow;
+use bytemuck::from_bytes;
+use image::{GenericImage, GenericImageView, ImageBuffer, Rgba, open};
+use std::sync::mpsc::channel;
 use wgpu::{
-    self,
+    self, BindingType,
     util::{BufferInitDescriptor, DeviceExt},
     wgc::id::markers::BindGroupLayout,
 };
 
-pub async fn setup() {
+pub async fn setup() -> anyhow::Result<()> {
     env_logger::init();
-    let img = open("test.png").unwrap().into_rgb8();
+    let img = open("test.png").unwrap().into_rgba8();
     let (width, height) = img.dimensions();
 
     let instance = wgpu::Instance::new(&Default::default());
     let adapter = instance.request_adapter(&Default::default()).await.unwrap();
     let (device, queue) = adapter.request_device(&Default::default()).await.unwrap();
-    let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
+    let shader = device.create_shader_module(wgpu::include_wgsl!("test.wgsl"));
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("encoder"),
     });
@@ -33,10 +36,10 @@ pub async fn setup() {
             wgpu::BindGroupLayoutEntry {
                 binding: 1,
                 visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::StorageTexture {
-                    access: wgpu::StorageTextureAccess::WriteOnly,
-                    format: wgpu::TextureFormat::Rgba8Unorm,
-                    view_dimension: wgpu::TextureViewDimension::D2,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
                 },
                 count: None,
             },
@@ -78,9 +81,20 @@ pub async fn setup() {
         height: dimensions.1,
         depth_or_array_layers: 1,
     };
+    let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("outptu"),
+        size: (width * height * 4) as u64,
+        usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::STORAGE,
+        mapped_at_creation: false,
+    });
+    let temp_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("temp"),
+        size: (width * height * 4) as u64,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
 
     let input_texture_view = input_texture.create_view(&wgpu::TextureViewDescriptor::default());
-    let test_texture_view = test_texture.create_view(&wgpu::TextureViewDescriptor::default());
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("BG1"),
         layout: &bind_group_layout,
@@ -91,7 +105,11 @@ pub async fn setup() {
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: wgpu::BindingResource::TextureView(&test_texture_view),
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &output_buffer,
+                    offset: 0,
+                    size: None,
+                }),
             },
         ],
     });
@@ -102,7 +120,7 @@ pub async fn setup() {
             origin: wgpu::Origin3d::ZERO,
             aspect: wgpu::TextureAspect::All,
         },
-        &img,
+        &img.as_raw(),
         wgpu::TexelCopyBufferLayout {
             offset: 0,
             bytes_per_row: Some(4 * dimensions.0),
@@ -124,9 +142,30 @@ pub async fn setup() {
         compilation_options: Default::default(),
         cache: Default::default(),
     });
-    let num_dispatches = img.len().div_ceil(64) as u32;
-    let mut pass = encoder.begin_compute_pass(&Default::default());
-    pass.set_pipeline(&pipeline);
-    pass.set_bind_group(0, &bind_group, &[]);
-    pass.dispatch_workgroups(num_dispatches, 1, 1);
+    let wg_size_x = 16;
+    let wg_size_y = 16;
+    let dx = (width + wg_size_x - 1) / wg_size_x;
+    let dy = (height + wg_size_y - 1) / wg_size_y;
+
+    {
+        let mut pass = encoder.begin_compute_pass(&Default::default());
+        pass.set_pipeline(&pipeline);
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.dispatch_workgroups(dx, dy, 1);
+    }
+    encoder.copy_buffer_to_buffer(&output_buffer, 0, &temp_buffer, 0, output_buffer.size());
+    queue.submit([encoder.finish()]);
+    {
+        let (tx, rx) = channel();
+        temp_buffer.map_async(wgpu::MapMode::Read, .., move |result| {
+            tx.send(result).unwrap()
+        });
+        device.poll(wgpu::PollType::wait_indefinitely())?;
+        rx.recv()??;
+        let output_data = temp_buffer.get_mapped_range(..);
+        let output_img: ImageBuffer<Rgba<u8>, _> =
+            ImageBuffer::from_raw(width, height, output_data.to_vec()).expect("error");
+        output_img.save("test1.png")?;
+        Ok(())
+    }
 }
