@@ -366,6 +366,7 @@ dependencies = [
 name = "edge-ascii"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "env_logger",
  "image",
  "pollster",
