@@ -1,4 +1,7 @@
+*
 **/.zig-cache/
+.DS_Store
 **/.DS_Store
 **/zig-out/
 **/.tasks
+
