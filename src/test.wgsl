@@ -1,8 +1,8 @@
 requires readonly_and_readwrite_storage_textures;
 @group(0) @binding(0) var input_texture: texture_2d<f32>;
-@group(0) @binding(1) var rw_texture: texture_storage_2d<rgba8unorm, read_write>;
-@group(0) @binding(2) var rw_texture2_1: texture_storage_2d<rgba8unorm, read_write>;
-@group(0) @binding(3) var rw_texture2_2: texture_storage_2d<rgba8unorm, read_write>;
+@group(0) @binding(1) var rw_texture0: texture_storage_2d<rgba8unorm, read_write>;
+@group(0) @binding(2) var rw_texture1: texture_storage_2d<rgba8unorm, read_write>;
+@group(0) @binding(3) var rw_texture2: texture_storage_2d<rgba8unorm, read_write>;
 @group(0) @binding(4) var<storage, read_write> output_buffer: array<u32>;
 
 @compute @workgroup_size(16,16)
@@ -30,7 +30,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         linear,
         test,
     );
-    textureStore(rw_texture, coords, srgb_packed);
+    textureStore(rw_texture0, coords, srgb_packed);
 }
 @compute @workgroup_size(16,16)
 fn main2(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -40,25 +40,84 @@ fn main2(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if coords.x >= i32(dims.x) || coords.y >= i32(dims.y) {
         return;
     }
-    let pixel = textureLoad(rw_texture, coords);
-    let invr = 1.0 - pixel.r;
-    let invg = 1.0 - pixel.g;
-    let invb = 1.0 - pixel.b;
+    let test1 = textureLoad(rw_texture0, coords);
+    let sigma = 2f;
+    let convolve = gauss(coords, sigma, vec2<i32>(0, 1), 0);
+    let sigma2 = sigma * sqrt(2f);
+    let convolve2 = gauss(coords, sigma2, vec2<i32>(0, 1), 0);
+    textureStore(rw_texture1, coords, convolve);
+    textureStore(rw_texture2, coords, convolve2);
+}
+@compute @workgroup_size(16,16)
+fn main3(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let coords = vec2<i32>(global_id.xy);
+    let dims = textureDimensions(input_texture);
 
+    if coords.x >= i32(dims.x) || coords.y >= i32(dims.y) {
+        return;
+    }
+    let sigma = 2f;
+    let convolve = gauss(coords, sigma, vec2<i32>(0, 1), 1);
+    let sigma2 = sigma * sqrt(2f);
+    let convolve2 = gauss(coords, sigma2, vec2<i32>(0, 1), 2);
 
-
-    let test: f32 = pixel.a;
-    let srgb_packed = vec4<f32>(
-        invr,
-        invg,
-        invb,
-        test,
+    let p = 30f;
+    let e = 0.4f;
+    let phi = 3f;
+    let xdog = (1f + p) * convolve.r - p * convolve2.r;
+    var txdog: f32;
+    if xdog >= e {
+        txdog = 1f;
+    } else {
+        txdog = 1f + tanh(phi * (xdog - e));
+    };
+    let test = textureLoad(rw_texture1, coords);
+    let test1 = vec4<f32>(
+        txdog,
+        txdog,
+        txdog,
+        convolve.a
     );
-    let packed = pack4x8unorm(srgb_packed);
+    textureStore(rw_texture1, coords, test1);
+}
+@compute @workgroup_size(16,16)
+fn main4(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let coords = vec2<i32>(global_id.xy);
+    let dims = textureDimensions(input_texture);
+    if coords.x >= i32(dims.x) || coords.y >= i32(dims.y) {
+        return;
+    }
+    let convolve = sobel(coords, true, vec2<i32>(1, 0), 1);
+    let convolve2 = sobel(coords, false, vec2<i32>(1, 0), 1);
+    textureStore(rw_texture1, coords, convolve);
+    textureStore(rw_texture2, coords, convolve2);
+}
+@compute @workgroup_size(16,16)
+fn main5(@builtin(global_invocation_id)global_id: vec3<u32>) {
+    let coords = vec2<i32>(global_id.xy);
+    let dims = textureDimensions(input_texture);
+    if coords.x >= i32(dims.x) || coords.y >= i32(dims.y) {
+        return;
+    }
+    let convolve = sobel(coords, false, vec2<i32>(1, 0), 1);
+    let convolve2 = sobel(coords, true, vec2<i32>(1, 0), 2);
+    let g = sqrt(convolve.r * convolve.r + convolve2.r * convolve2.r);
+    let g_packed = vec4<f32>(
+        g,
+        g,
+        g,
+        convolve.a
+    );
+    let packed = pack4x8unorm(g_packed);
     let index = u32(coords.y) * dims.x + u32(coords.x);
     output_buffer[index] = packed;
 }
-fn gauss(coords: vec2<i32>, sigma: f32, direction: vec2<i32>, texture: texture_2d<f32>) -> vec4<f32> {
+
+fn test(coords: vec2<i32>, texture: texture_storage_2d<rgba8unorm,read_write>) -> vec4<f32> {
+    let test = textureLoad(texture, coords);
+    return vec4<f32>(test);
+}
+fn gauss(coords: vec2<i32>, sigma: f32, direction: vec2<i32>, texel: i32) -> vec4<f32> {
     let k_size = sigma * 6f + 1f;
     let k_middle = ceil((k_size - 1.0) / 2.0);
     let arr = kernal(k_size, k_middle, sigma);
@@ -68,13 +127,19 @@ fn gauss(coords: vec2<i32>, sigma: f32, direction: vec2<i32>, texture: texture_2
     for (var i: i32; i < i32(k_size); i = i + 1) {
         let offset = i - i32(k_middle);
         let input_coords = coords + direction * offset;
-        let pix = textureLoad(texture, input_coords, 0);
+        var pix = vec4<f32>(0.0);
+        switch(texel){
+        case 0:{pix = textureLoad(rw_texture0, input_coords);}
+        case 1:{pix = textureLoad(rw_texture1, input_coords);}
+        case 2:{pix = textureLoad(rw_texture2, input_coords);}
+        default: {pix = vec4<f32>(0.0);}
+    }
         alpha = pix.a;
         convolve += vec3<f32>(pix.rgb * arr[i]);
     }
     return vec4<f32>(convolve, alpha);
 } 
-fn sobel(coords: vec2<i32>, axis: bool, direction: vec2<i32>, texture: texture_2d<f32>) -> vec4<f32> {
+fn sobel(coords: vec2<i32>, axis: bool, direction: vec2<i32>, texel: i32) -> vec4<f32> {
     let p1 = array<f32,3>(1, 2, 1);
     let p2 = array<f32,3>(-1, 0, 1);
     var kernal = array<f32,3>();
@@ -90,7 +155,14 @@ fn sobel(coords: vec2<i32>, axis: bool, direction: vec2<i32>, texture: texture_2
     for (var i: i32; i < 3; i = i + 1) {
         let offset = i - 1;
         let input_coords = coords + direction * offset;
-        let pix = textureLoad(texture, input_coords, 0);
+        var pix = vec4<f32>(0.0);
+        switch(texel){
+        case 0:{pix = textureLoad(rw_texture0, input_coords);}
+        case 1:{pix = textureLoad(rw_texture1, input_coords);}
+        case 2:{pix = textureLoad(rw_texture2, input_coords);}
+        default: {pix = vec4<f32>(0.0);}
+    }
+
         alpha = pix.a;
         convolve += vec3<f32>(pix.rgb * kernal[i]);
     }

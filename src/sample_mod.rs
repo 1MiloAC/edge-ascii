@@ -136,6 +136,20 @@ pub async fn setup() -> anyhow::Result<()> {
         usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
         view_formats: &[],
     });
+    let rw_texture3 = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("rw"),
+        size: wgpu::Extent3d {
+            width: width,
+            height: height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
 
     let texture_size = wgpu::Extent3d {
         width: dimensions.0,
@@ -158,6 +172,8 @@ pub async fn setup() -> anyhow::Result<()> {
     let input_texture_view = input_texture.create_view(&wgpu::TextureViewDescriptor::default());
     let rw_texture_view = rw_texture.create_view(&wgpu::TextureViewDescriptor::default());
     let rw_texture_view2 = rw_texture2.create_view(&wgpu::TextureViewDescriptor::default());
+    let rw_texture_view3 = rw_texture3.create_view(&wgpu::TextureViewDescriptor::default());
+
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("BG1"),
         layout: &bind_group_layout,
@@ -176,7 +192,7 @@ pub async fn setup() -> anyhow::Result<()> {
             },
             wgpu::BindGroupEntry {
                 binding: 3,
-                resource: wgpu::BindingResource::TextureView(&rw_texture_view2),
+                resource: wgpu::BindingResource::TextureView(&rw_texture_view3),
             },
             wgpu::BindGroupEntry {
                 binding: 4,
@@ -226,6 +242,30 @@ pub async fn setup() -> anyhow::Result<()> {
         compilation_options: Default::default(),
         cache: Default::default(),
     });
+    let pipeline3 = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("Start"),
+        layout: Some(&pipeline_layout),
+        module: &shader,
+        entry_point: Some("main3"),
+        compilation_options: Default::default(),
+        cache: Default::default(),
+    });
+    let pipeline4 = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("Start"),
+        layout: Some(&pipeline_layout),
+        module: &shader,
+        entry_point: Some("main4"),
+        compilation_options: Default::default(),
+        cache: Default::default(),
+    });
+    let pipeline5 = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("Start"),
+        layout: Some(&pipeline_layout),
+        module: &shader,
+        entry_point: Some("main5"),
+        compilation_options: Default::default(),
+        cache: Default::default(),
+    });
 
     let wg_size_x = 16;
     let wg_size_y = 16;
@@ -243,6 +283,24 @@ pub async fn setup() -> anyhow::Result<()> {
         pass2.set_pipeline(&pipeline2);
         pass2.set_bind_group(0, &bind_group, &[]);
         pass2.dispatch_workgroups(dx, dy, 1);
+    }
+    {
+        let mut pass3 = encoder.begin_compute_pass(&Default::default());
+        pass3.set_pipeline(&pipeline3);
+        pass3.set_bind_group(0, &bind_group, &[]);
+        pass3.dispatch_workgroups(dx, dy, 1);
+    }
+    {
+        let mut pass4 = encoder.begin_compute_pass(&Default::default());
+        pass4.set_pipeline(&pipeline4);
+        pass4.set_bind_group(0, &bind_group, &[]);
+        pass4.dispatch_workgroups(dx, dy, 1);
+    }
+    {
+        let mut pass5 = encoder.begin_compute_pass(&Default::default());
+        pass5.set_pipeline(&pipeline5);
+        pass5.set_bind_group(0, &bind_group, &[]);
+        pass5.dispatch_workgroups(dx, dy, 1);
     }
     encoder.copy_buffer_to_buffer(&output_buffer, 0, &temp_buffer, 0, output_buffer.size());
     queue.submit([encoder.finish()]);
