@@ -1,3 +1,3 @@
-# ⚠️ THIS BRANCH IS A WIP REFACTOR
-This branch is currently being refactored from **Zig -> Rust**, the current working branch is _main_.
-I suggest reviewing it to gage the current depth of the project.
+# edge-ascii
+
+This is a wip shader program leveraging WGPU + Rust + WGSL to extract high definition edge data for use in ascii conversion.
