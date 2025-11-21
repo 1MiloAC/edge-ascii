@@ -18,7 +18,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let oy = coords.y / 8;
     let x = i32(floor(f32(dims.x) / 8f));
     let pixel = textureLoad(input_texture, coords, 0);
-    textureStore(rw_texture0, vec2<i32>(ox, oy), pixel);
+    let lum = luminizer(pixel);
+    textureStore(rw_texture0, vec2<i32>(ox, oy), lum);
 }
 @compute @workgroup_size(16,16)
 fn main2(@builtin(global_invocation_id)global_id: vec3<u32>) {
@@ -40,3 +41,25 @@ fn main2(@builtin(global_invocation_id)global_id: vec3<u32>) {
         }
     }
 }
+fn luminizer(c: vec4<f32>) -> vec4<f32> {
+    let lum = c.r * 0.2126 + c.g * 0.7152 + c.b * 0.0722;
+    let cst = floor(f32(lum) * 10f) / 10f;
+    let clm = clamp(cst, 0f, 1f);
+    return vec4<f32>(clm, clm, clm, c.a);
+}
+fn srgbizer(c: f32) -> f32 {
+    if c <= 0.0031308 {
+        return c * 12.92;
+    } else {
+        return pow(c, 1.0 / 2.4) - 0.055;
+    }
+}
+
+fn linearizer(c: f32) -> f32 {
+    if c <= 0.04045 {
+        return c / 12.92;
+    } else {
+        return pow(((c + 0.055) / 1.055), 2.4);
+    }
+}
+

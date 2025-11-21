@@ -8,7 +8,7 @@ use wgpu::{
     wgc::id::markers::BindGroupLayout,
 };
 
-pub async fn setup() -> anyhow::Result<()> {
+pub async fn setup() -> anyhow::Result<ImageBuffer<Rgba<u8>, Vec<u8>>> {
     //env_logger::init();
     let img = open("test.png").unwrap().into_rgba8();
     let (width, height) = img.dimensions();
@@ -212,7 +212,7 @@ pub async fn setup() -> anyhow::Result<()> {
         let output_data = temp_buffer.get_mapped_range(..);
         let output_img: ImageBuffer<Rgba<u8>, _> =
             ImageBuffer::from_raw(width, height, output_data.to_vec()).expect("error");
-        output_img.save("test3.png")?;
-        Ok(())
+        //output_img.save("test3.png")?;
+        Ok(output_img)
     }
 }
