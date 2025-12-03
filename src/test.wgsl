@@ -101,11 +101,12 @@ fn main5(@builtin(global_invocation_id)global_id: vec3<u32>) {
     }
     let convolve = sobel(coords, false, vec2<i32>(1, 0), 1);
     let convolve2 = sobel(coords, true, vec2<i32>(1, 0), 2);
-    let g = sqrt(convolve.r * convolve.r + convolve2.r * convolve2.r);
+    let theta = atan2(pow(convolve.r, 2f), pow(convolve2.r, 2f));
+    //let g = sqrt(convolve.r * convolve.r + convolve2.r * convolve2.r);
     let g_packed = vec4<f32>(
-        g,
-        g,
-        g,
+        theta,
+        theta,
+        theta,
         convolve.a
     );
     let packed = pack4x8unorm(g_packed);
