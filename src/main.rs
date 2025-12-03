@@ -16,8 +16,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let img = open("test.png").unwrap().into_rgb8();
     img.as_raw();
     img.save("test.jpg")?;
-    pollster::block_on(sample_mod::setup());
+    //pollster::block_on(sample_mod::setup());
     let resize = pollster::block_on(resize::setup());
-    resize.unwrap().save("resize.png")?;
+    pollster::block_on(ascii::setup(resize?));
+    //resize.unwrap().save("resize.png")?;
     Ok(())
 }
